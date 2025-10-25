@@ -8,15 +8,60 @@ const allCount = document.getElementById('allCount');
 const activeCount = document.getElementById('activeCount');
 const completedCount = document.getElementById('completedCount');
 
+// Initialisation Supabase
+let supabase = null;
+let useSupabase = false;
+
+try {
+    if (typeof SUPABASE_URL !== 'undefined' && typeof SUPABASE_ANON_KEY !== 'undefined' &&
+        SUPABASE_URL !== 'YOUR_SUPABASE_URL' && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY') {
+        supabase = supabaseClient.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        useSupabase = true;
+        console.log('✅ Supabase connecté avec succès');
+    } else {
+        console.log('⚠️ Supabase non configuré, utilisation du localStorage');
+    }
+} catch (error) {
+    console.log('⚠️ Erreur de configuration Supabase, utilisation du localStorage:', error);
+}
+
 // État de l'application
-let tasks = JSON.parse(localStorage.getItem('tasks')) || [];
+let tasks = [];
 let currentFilter = 'all';
 
 // Initialisation
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadTasks();
     renderTasks();
     updateCounts();
 });
+
+// Charger les tâches depuis Supabase ou localStorage
+async function loadTasks() {
+    if (useSupabase) {
+        try {
+            const { data, error } = await supabase
+                .from('tasks')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            tasks = data.map(task => ({
+                id: task.id,
+                text: task.text,
+                completed: task.completed,
+                createdAt: task.created_at
+            }));
+        } catch (error) {
+            console.error('Erreur lors du chargement depuis Supabase:', error);
+            // Fallback vers localStorage en cas d'erreur
+            tasks = JSON.parse(localStorage.getItem('tasks')) || [];
+        }
+    } else {
+        tasks = JSON.parse(localStorage.getItem('tasks')) || [];
+    }
+}
 
 // Ajouter une tâche
 addBtn.addEventListener('click', addTask);
@@ -26,7 +71,7 @@ taskInput.addEventListener('keypress', (e) => {
     }
 });
 
-function addTask() {
+async function addTask() {
     const taskText = taskInput.value.trim();
 
     if (taskText === '') {
@@ -38,15 +83,44 @@ function addTask() {
         return;
     }
 
-    const task = {
-        id: Date.now(),
+    const newTask = {
         text: taskText,
         completed: false,
-        createdAt: new Date().toISOString()
+        created_at: new Date().toISOString()
     };
 
-    tasks.unshift(task);
-    saveTasks();
+    if (useSupabase) {
+        try {
+            const { data, error } = await supabase
+                .from('tasks')
+                .insert([newTask])
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            tasks.unshift({
+                id: data.id,
+                text: data.text,
+                completed: data.completed,
+                createdAt: data.created_at
+            });
+        } catch (error) {
+            console.error('Erreur lors de l\'ajout dans Supabase:', error);
+            alert('Erreur lors de l\'ajout de la tâche. Vérifiez votre connexion.');
+            return;
+        }
+    } else {
+        const task = {
+            id: Date.now(),
+            text: taskText,
+            completed: false,
+            createdAt: new Date().toISOString()
+        };
+        tasks.unshift(task);
+        saveTasks();
+    }
+
     renderTasks();
     updateCounts();
 
@@ -61,37 +135,102 @@ function addTask() {
 }
 
 // Basculer l'état de complétion d'une tâche
-function toggleTask(id) {
-    tasks = tasks.map(task =>
-        task.id === id ? { ...task, completed: !task.completed } : task
-    );
-    saveTasks();
+async function toggleTask(id) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+
+    const newCompletedState = !task.completed;
+
+    if (useSupabase) {
+        try {
+            const { error } = await supabase
+                .from('tasks')
+                .update({ completed: newCompletedState })
+                .eq('id', id);
+
+            if (error) throw error;
+
+            tasks = tasks.map(task =>
+                task.id === id ? { ...task, completed: newCompletedState } : task
+            );
+        } catch (error) {
+            console.error('Erreur lors de la mise à jour dans Supabase:', error);
+            alert('Erreur lors de la mise à jour de la tâche.');
+            return;
+        }
+    } else {
+        tasks = tasks.map(task =>
+            task.id === id ? { ...task, completed: newCompletedState } : task
+        );
+        saveTasks();
+    }
+
     renderTasks();
     updateCounts();
 }
 
 // Supprimer une tâche
-function deleteTask(id) {
+async function deleteTask(id) {
     const taskElement = document.querySelector(`[data-id="${id}"]`);
     taskElement.style.animation = 'slideOut 0.3s ease';
 
-    setTimeout(() => {
-        tasks = tasks.filter(task => task.id !== id);
-        saveTasks();
+    setTimeout(async () => {
+        if (useSupabase) {
+            try {
+                const { error } = await supabase
+                    .from('tasks')
+                    .delete()
+                    .eq('id', id);
+
+                if (error) throw error;
+
+                tasks = tasks.filter(task => task.id !== id);
+            } catch (error) {
+                console.error('Erreur lors de la suppression dans Supabase:', error);
+                alert('Erreur lors de la suppression de la tâche.');
+                return;
+            }
+        } else {
+            tasks = tasks.filter(task => task.id !== id);
+            saveTasks();
+        }
+
         renderTasks();
         updateCounts();
     }, 300);
 }
 
 // Supprimer toutes les tâches terminées
-clearCompletedBtn.addEventListener('click', () => {
-    if (tasks.filter(task => task.completed).length === 0) {
+clearCompletedBtn.addEventListener('click', async () => {
+    const completedTasks = tasks.filter(task => task.completed);
+
+    if (completedTasks.length === 0) {
         return;
     }
 
     if (confirm('Êtes-vous sûr de vouloir supprimer toutes les tâches terminées ?')) {
-        tasks = tasks.filter(task => !task.completed);
-        saveTasks();
+        if (useSupabase) {
+            try {
+                const completedIds = completedTasks.map(task => task.id);
+
+                const { error } = await supabase
+                    .from('tasks')
+                    .delete()
+                    .in('id', completedIds);
+
+                if (error) throw error;
+
+                tasks = tasks.filter(task => !task.completed);
+            } catch (error) {
+                console.error('Erreur lors de la suppression dans Supabase:', error);
+                alert('Erreur lors de la suppression des tâches terminées.');
+                return;
+            }
+        } else {
+            tasks = tasks.filter(task => !task.completed);
+            saveTasks();
+        }
+
         renderTasks();
         updateCounts();
     }
@@ -179,7 +318,7 @@ function updateCounts() {
     completedCount.textContent = completed;
 }
 
-// Sauvegarder les tâches dans le localStorage
+// Sauvegarder les tâches dans le localStorage (fallback)
 function saveTasks() {
     localStorage.setItem('tasks', JSON.stringify(tasks));
 }
