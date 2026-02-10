@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  displayName   String
+  avatar        String?
+  canvaUserId   String?  @unique
+  canvaTeamId   String?
+  accessToken   String?
+  refreshToken  String?
+  tokenExpiry   DateTime?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  designs       Design[]
+  templates     Template[]
+  assets        Asset[]
+  folders       Folder[]
+  exports       Export[]
+  comments      Comment[]
+  settings      Setting[]
+
+  @@map("users")
+}
+
+model Design {
+  id              String   @id @default(uuid())
+  canvaDesignId   String?  @unique
+  title           String
+  description     String?
+  designType      String   @default("custom")
+  width           Int?
+  height          Int?
+  thumbnailUrl    String?
+  editUrl         String?
+  viewUrl         String?
+  status          String   @default("draft")
+  metadata        String?
+  tags            String?
+  userId          String
+  folderId        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder          Folder?  @relation(fields: [folderId], references: [id])
+  pages           DesignPage[]
+  exports         Export[]
+  comments        Comment[]
+  templateDesigns TemplateDesign[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("designs")
+}
+
+model DesignPage {
+  id           String  @id @default(uuid())
+  designId     String
+  pageNumber   Int
+  thumbnailUrl String?
+  width        Int?
+  height       Int?
+
+  design       Design  @relation(fields: [designId], references: [id], onDelete: Cascade)
+
+  @@unique([designId, pageNumber])
+  @@map("design_pages")
+}
+
+model Template {
+  id                String   @id @default(uuid())
+  canvaTemplateId   String?  @unique
+  name              String
+  description       String?
+  category          String?
+  thumbnailUrl      String?
+  previewUrl        String?
+  datasetFields     String?
+  isPublic          Boolean  @default(false)
+  usageCount        Int      @default(0)
+  tags              String?
+  metadata          String?
+  userId            String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  templateDesigns   TemplateDesign[]
+
+  @@index([userId])
+  @@index([category])
+  @@map("templates")
+}
+
+model TemplateDesign {
+  id          String   @id @default(uuid())
+  templateId  String
+  designId    String
+  autofillData String?
+  createdAt   DateTime @default(now())
+
+  template    Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+
+  @@map("template_designs")
+}
+
+model Asset {
+  id            String   @id @default(uuid())
+  canvaAssetId  String?  @unique
+  name          String
+  type          String
+  mimeType      String?
+  size          Int?
+  url           String?
+  thumbnailUrl  String?
+  tags          String?
+  metadata      String?
+  folderId      String?
+  userId        String
+  uploadJobId   String?
+  uploadStatus  String   @default("completed")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder        Folder?  @relation(fields: [folderId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@map("assets")
+}
+
+model Folder {
+  id              String   @id @default(uuid())
+  canvaFolderId   String?  @unique
+  name            String
+  parentId        String?
+  userId          String
+  color           String?
+  icon            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent          Folder?  @relation("FolderTree", fields: [parentId], references: [id])
+  children        Folder[] @relation("FolderTree")
+  designs         Design[]
+  assets          Asset[]
+
+  @@index([userId])
+  @@index([parentId])
+  @@map("folders")
+}
+
+model Export {
+  id            String   @id @default(uuid())
+  canvaExportId String?
+  designId      String
+  userId        String
+  format        String
+  quality       String?
+  status        String   @default("pending")
+  downloadUrl   String?
+  fileSize      Int?
+  errorMessage  String?
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  design        Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([designId])
+  @@map("exports")
+}
+
+model Comment {
+  id            String   @id @default(uuid())
+  canvaThreadId String?
+  designId      String
+  userId        String
+  message       String
+  parentId      String?
+  positionX     Float?
+  positionY     Float?
+  pageNumber    Int?
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  design        Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent        Comment? @relation("CommentTree", fields: [parentId], references: [id])
+  replies       Comment[] @relation("CommentTree")
+
+  @@index([designId])
+  @@index([userId])
+  @@map("comments")
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  userId    String
+  key       String
+  value     String
+  group     String   @default("general")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
+  @@map("settings")
+}
+
+model AppConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  group     String   @default("general")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("app_config")
+}
